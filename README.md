@@ -160,13 +160,24 @@ curl localhost:8000/sessions/{id}/evaluation
 python -m scripts.run_experiment --turns 10
 ```
 
-Runs baseline + all 4 strategies across all 3 task types (story generation,
-product brainstorming, interface design), fully offline, and prints per-run
+Runs baseline + all 4 strategies across the core task types (story
+generation, product brainstorming), fully offline, and prints per-run
 and averaged metrics (semantic diversity, embedding dispersion, lexical
 diversity, novelty score, intervention count). This is your starting point
 for the quantitative half of the evaluation section — swap in real
 Gemini/sentence-transformers backends and larger `--turns` once you're ready
 to generate results for the writeup.
+
+**Scope note:** the core matrix is 2 task types × 2 seeds × 5 strategies (20
+trials, 4 blocks for the Friedman test), reduced from an original 3-task
+design to fit the remaining quota/timeline. A third task type
+(`interface_design`) was piloted early on; those trials are kept in
+`experiment_results_supplementary.jsonl` as exploratory/illustrative data
+rather than part of the primary statistical comparison, since it doesn't
+have a complete, matched set of trials across all 5 strategies and both
+seeds. This decision was made before the branch-selection fix (see below)
+was validated against any adaptive-strategy numbers, so it isn't
+result-contingent.
 
 ## Frontend
 

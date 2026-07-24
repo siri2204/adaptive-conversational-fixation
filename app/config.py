@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # --- LLM backend ---
     llm_backend: str = Field(default="mock", description="'gemini' or 'mock'")
     gemini_api_key: str | None = Field(default=None)
-    gemini_model: str = Field(default="gemini-2.5-flash")
+    gemini_model: str = Field(default="gemini-3.5-flash-lite")
 
     # --- Embedding backend ---
     embedding_backend: str = Field(default="mock", description="'sentence-transformers' or 'mock'")

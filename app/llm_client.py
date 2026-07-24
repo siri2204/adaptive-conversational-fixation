@@ -82,6 +82,17 @@ class GeminiLLMClient(LLMClient):
         for attempt in range(self.max_retries):
             try:
                 return fn()
+            except genai_errors.ServerError as e:
+                last_exc = e
+                is_transient = getattr(e, "code", None) == 503 or "UNAVAILABLE" in str(e)
+                if not is_transient:
+                    raise
+                wait_seconds = _extract_retry_delay(e) or (2 ** attempt) * 5
+                print(
+                    f"[GeminiLLMClient] Server unavailable / high demand (attempt "
+                    f"{attempt + 1}/{self.max_retries}). Waiting {wait_seconds:.0f}s before retrying..."
+                )
+                time.sleep(wait_seconds)
             except genai_errors.ClientError as e:
                 last_exc = e
                 is_rate_limit = getattr(e, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(e)
