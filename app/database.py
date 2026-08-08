@@ -77,6 +77,7 @@ class InterventionEvent(Base):
     strategy = Column(String, nullable=False)
     triggered = Column(Boolean, nullable=False)
     fixation_score = Column(Float, nullable=True)
+    user_forced = Column(Boolean, nullable=False, default=False)
     avg_similarity = Column(Float, nullable=True)
     dispersion = Column(Float, nullable=True)
     trajectory_movement = Column(Float, nullable=True)

@@ -106,6 +106,7 @@ def _run_strategy_and_maybe_intervene(
                 turn_index=ctx.turn_index,
                 strategy=sess.strategy,
                 triggered=True,
+                user_forced=user_forced,
                 fixation_score=metrics.fixation_score,
                 avg_similarity=metrics.avg_similarity,
                 dispersion=metrics.dispersion,

@@ -7,3 +7,38 @@ venv/
 .pytest_cache/
 *.egg-info/
 
+
+study/data/
+
+# --- secrets ---
+.env
+.env.*
+!.env.example
+
+# --- databases: contain participant conversation text (GDPR) ---
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# --- human study participant data: do not commit ---
+study/data/
+
+# --- patch backups ---
+*.bak
+*.orig
+*.rej
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# --- os / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
