@@ -1,0 +1,36 @@
+{
+  "blocks": 6,
+  "tests": {
+    "semantic_diversity": {
+      "chi2": 13.733333333333334,
+      "p": 0.00819662952043236,
+      "df": 4,
+      "n_blocks": 6
+    },
+    "embedding_dispersion": {
+      "chi2": 15.066666666666663,
+      "p": 0.004564924652645845,
+      "df": 4,
+      "n_blocks": 6
+    },
+    "lexical_diversity": {
+      "chi2": 8.399999999999991,
+      "p": 0.07797699946648434,
+      "df": 4,
+      "n_blocks": 6
+    },
+    "novelty_score": {
+      "chi2": 14.399999999999991,
+      "p": 0.006122003628688793,
+      "df": 4,
+      "n_blocks": 6
+    }
+  },
+  "average_ranks": {
+    "baseline": 4.25,
+    "static": 3.2083333333333335,
+    "fixed_interval": 3.3333333333333335,
+    "user_triggered": 2.8333333333333335,
+    "adaptive": 1.375
+  }
+}

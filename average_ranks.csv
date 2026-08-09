@@ -1,0 +1,6 @@
+strategy,average_rank
+adaptive,1.375
+user_triggered,2.833
+static,3.208
+fixed_interval,3.333
+baseline,4.250

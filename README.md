@@ -1,186 +1,236 @@
 # Adaptive Detection and Mitigation of Conversational Fixation
 
-A stateful FastAPI backend that detects **semantic fixation** during long-form
-human-AI co-creation and delivers structured **exploration-tree** interventions
-to push the user toward unexplored regions of the idea space.
+Seminar project — Universität des Saarlandes.
 
-This implements the full pipeline described in the proposal: the
-fixation-detection math, all four intervention-timing strategies (plus a
-baseline control), the exploration-tree generation mechanism, and the
-evaluation metrics used for the experimental comparison — validated end-to-end
-against real Gemini + sentence-transformer embeddings, with a completed,
-statistically significant experimental comparison across all 5 strategies.
+A stateful FastAPI backend that detects **semantic fixation** during long-form
+human–AI co-creation and delivers structured **exploration-tree** interventions
+intended to push the conversation toward unexplored regions of the idea space.
+
+This repository contains the full pipeline described in the report: the
+fixation-detection math, four intervention-timing strategies plus a baseline
+control, the exploration-tree generation mechanism, the evaluation metrics, the
+automated experimental comparison, and the materials and analysis scripts used
+for the human study.
+
+---
 
 ## Results
 
-The core hypothesis — that **adaptive**, fixation-triggered intervention
-timing outperforms fixed-schedule or manual timing — is supported by the
-data. Full matrix: 3 task types × 2 seeds × 5 strategies = 30 trials (6
-blocks), run against `gemini-3.5-flash-lite` + `sentence-transformers`
-(`all-MiniLM-L6-v2`) embeddings.
+Full matrix: 3 task types × 2 seed prompts × 5 strategies = 30 conversations
+(6 blocks), run against `gemini-3.5-flash-lite` with `sentence-transformers`
+(`all-MiniLM-L6-v2`) embeddings. Raw per-trial data is in
+`experiment_results.jsonl`.
 
-**Friedman test (6 blocks × 5 strategies):**
+**Friedman test (6 blocks × 5 strategies, df = 4):**
 
-| metric | χ² | p-value | significant (α=.05)? |
+| metric | χ² | p-value | significant (α = .05)? |
 |---|---|---|---|
-| semantic diversity | 13.73 | 0.0082 | yes |
-| embedding dispersion | 15.07 | 0.0046 | yes |
-| novelty score | 14.40 | 0.0061 | yes |
-| lexical diversity | 8.40 | 0.0780 | no |
+| semantic diversity | 13.73 | 0.008 | yes |
+| embedding dispersion | 15.07 | 0.005 | yes |
+| novelty score | 14.40 | 0.006 | yes |
+| lexical diversity | 8.40 | 0.078 | no |
 
-**Average rank per strategy (1 = best), across all 6 blocks:**
+**Average rank per strategy (lower is better):**
 
 | strategy | avg. rank |
 |---|---|
-| adaptive | 1.33 |
-| static | 2.67 |
-| fixed_interval | 3.17 |
-| user_triggered | 3.17 |
-| baseline | 4.67 |
+| adaptive | 1.375 |
+| user_triggered | 2.833 |
+| static | 3.208 |
+| fixed_interval | 3.333 |
+| baseline | 4.250 |
 
-`adaptive` ranked 1st or 2nd in every single block. `baseline` (no
-intervention) was reliably worst, as expected. Lexical diversity — a simple
-type-token ratio — didn't reach significance; see "What's deliberately left"
-below for a likely fix.
+The adaptive condition achieved the best overall ranking across all four
+metrics. Two caveats are discussed in the report and repeated here:
 
-**A confound worth disclosing:** an earlier pass at this comparison showed
-`adaptive` performing *worse* than every other strategy, despite intervening
-more often. Root cause: the experiment runner passed a single fixed branch
-category to every intervention across the whole matrix, so `adaptive`
-(intervening ~3x per conversation) kept re-offering the *same* exploration
-direction instead of a different one each time, compounding rather than
-broadening. Fixed by rotating through the five branch categories by
-intervention count (`scripts/run_experiment.py`). The numbers above are from
-the corrected runner; raw per-trial data is in `experiment_results.jsonl`.
+- **Intervention frequency is confounded with timing.** Because conversations
+  are twelve turns long, the static, fixed-interval and user-triggered
+  strategies each perform a single intervention, while the adaptive strategy
+  averaged three. The advantage therefore cannot be attributed to *when* it
+  intervened rather than *how often*. A dose-matched control condition would
+  be needed to separate the two.
+- **Metrics are computed over complete conversations, including user turns.**
+  Since intervention turns replace the fixed user prompt with exploration-tree
+  branch text, lexical diversity in particular is partly influenced by the
+  injected prompts. It was also the only metric not to reach significance.
 
-## Why it can also run fully offline
+Reproduce both tables with:
 
-Everything defaults to **mock** LLM + **mock** embedding backends, so the
-whole pipeline is developable/testable with zero API keys and zero network
-access. Flip two env vars to go live with Gemini + real sentence embeddings
-(see `.env.example`).
+```bash
+python -m scripts.friedman_test    # Friedman tests, average ranks, strategy means
+python -m scripts.analyze_results  # paired comparisons of each strategy vs. baseline
+```
 
-> Sandboxed/locked-down environments: `sentence-transformers` needs to
-> download model weights from huggingface.co, and the Gemini client needs to
-> reach Google's API — neither may be reachable on a restricted network. The
-> mock backends have zero external dependencies for exactly this reason.
+`friedman_test.py` reproduces both tables above exactly and writes
+`friedman_results.json`, `average_ranks.csv` and `strategy_means.csv`. It also
+prints the mean intervention count per strategy, which is the basis for the
+frequency caveat noted above. `analyze_results.py` performs a separate
+analysis — paired t-tests and Wilcoxon signed-rank tests against the baseline
+condition — and writes `stats_report.csv`.
+
+### A bug found and fixed during development
+
+An earlier pass at this comparison showed `adaptive` performing *worse* than
+every other strategy despite intervening more often. The experiment runner was
+passing a single fixed branch category to every intervention across the whole
+matrix, so `adaptive` kept re-offering the *same* exploration direction rather
+than a different one each time — compounding convergence instead of broadening
+it. Fixed by rotating through the five branch categories by intervention count
+in `scripts/run_experiment.py`. The results above come from the corrected
+runner.
+
+---
 
 ## Architecture
 
 ```
 app/
-  config.py         Settings (env-var driven), all thresholds live here
-  database.py       SQLAlchemy models: ConversationSession, Turn, InterventionEvent
-  schemas.py        Pydantic request/response models
-  embeddings.py     EmbeddingBackend: MockEmbeddingBackend | SentenceTransformerBackend
-  llm_client.py     LLMClient: MockLLMClient | GeminiLLMClient (with retry/backoff
-                    for both rate limits and transient server overload)
-  fixation.py       FixationAnalyzer — the core detection math (see below)
-  strategies.py     The 4 intervention-timing strategies + baseline
-  intervention.py   ExplorationTreeGenerator — the intervention content
-  evaluation.py     Post-hoc metrics: semantic diversity, dispersion, lexical
-                     diversity, novelty
-  routers/sessions.py FastAPI endpoints tying it all together
-  main.py           App entrypoint
-tests/              Unit tests for fixation math + strategy logic (30 tests)
+  config.py            Settings (env-var driven); all thresholds live here
+  database.py          SQLAlchemy models: ConversationSession, Turn, InterventionEvent
+  schemas.py           Pydantic request/response models
+  embeddings.py        MockEmbeddingBackend | SentenceTransformerBackend
+  llm_client.py        MockLLMClient | GeminiLLMClient (retry/backoff for rate
+                       limits and transient server overload)
+  fixation.py          FixationAnalyzer — the core detection math
+  strategies.py        The four intervention-timing strategies + baseline
+  intervention.py      ExplorationTreeGenerator — the intervention content
+  evaluation.py        Post-hoc metrics: semantic diversity, dispersion,
+                       lexical diversity, novelty
+  routers/sessions.py  FastAPI endpoints
+  main.py              App entrypoint
+
+frontend/app.py        Streamlit interface used by the study participants
+
 scripts/
-  run_experiment.py    Resumable, budget-aware experimental comparison runner
-  analyze_results.py   Friedman test + descriptive stats over experiment_results.jsonl
+  run_experiment.py         Resumable, budget-aware experiment runner
+  friedman_test.py          Friedman tests + average ranks (reproduces the
+                            tables above)
+  analyze_results.py        Paired comparisons of each strategy vs. baseline
+  calibrate_thresholds.py   Threshold calibration against real embeddings
+  analyze_session.py        Per-session record for the human study: turns,
+                            interventions, and evaluation metrics
+  reconstruct_trajectory.py Recomputes the per-turn fixation trajectory from
+                            stored embeddings using the live FixationAnalyzer
+
+study/
+  participant_materials.pdf Task brief, questionnaire, and open questions
+  build_materials.py        Generates the above
+  data/                     Per-participant session records and responses
+
+tests/                 Unit tests for the fixation math, strategies, evaluation
+                       metrics, and API
 ```
 
 ### Fixation detection (`fixation.py`)
 
-For a sliding window of the most recent N turn embeddings, three signals are
+Over a sliding window of the six most recent turn embeddings, three signals are
 computed:
 
 1. **avg_similarity** — mean pairwise cosine similarity within the window.
-   High similarity ⇒ turns are saying near-identical things.
-2. **dispersion** — mean distance of each embedding to the window centroid
-   (how spread out the point cloud is). Low dispersion ⇒ convergence.
-3. **trajectory_movement** — distance between the centroid of the first half
-   and second half of the window. Low movement ⇒ the conversation isn't
-   drifting anywhere new even turn-to-turn.
+   High similarity means turns are saying near-identical things.
+2. **dispersion** — mean distance of each embedding to the window centroid.
+   Low dispersion means convergence.
+3. **trajectory_movement** — distance between the centroids of the first and
+   second halves of the window. Low movement means the conversation isn't
+   drifting anywhere new.
 
-These combine into a single `fixation_score ∈ [0, 1]`; when it crosses
-`FIXATION_FIXATION_SCORE_THRESHOLD`, the conversation is flagged as fixated.
-**Default thresholds are tuned for mock embeddings.** Real
-`sentence-transformers` output has a very different scale — the values
-actually used for the experiment (in `.env`) were empirically recalibrated:
-`FIXATION_FIXATION_SIMILARITY_THRESHOLD=0.27`,
-`FIXATION_FIXATION_DISPERSION_THRESHOLD=0.39`,
-`FIXATION_FIXATION_SCORE_THRESHOLD=0.17`. If you change embedding models,
-recalibrate against a few real conversations before trusting the defaults.
+These combine into a `fixation_score ∈ [0, 1]`, weighted 0.5 / 0.3 / 0.2. A
+window is flagged as fixated when the composite score crosses its threshold, or
+when the similarity–dispersion criterion is met.
+
+**The defaults in `config.py` are tuned for mock embeddings and should not be
+used with real ones.** Real `sentence-transformers` output sits on a very
+different scale. The values used for all reported experiments were recalibrated
+empirically and live in `.env`:
+
+```
+FIXATION_FIXATION_SIMILARITY_THRESHOLD=0.27
+FIXATION_FIXATION_DISPERSION_THRESHOLD=0.39
+FIXATION_FIXATION_SCORE_THRESHOLD=0.17
+```
+
+If you change embedding models, recalibrate against real conversations
+(`scripts/calibrate_thresholds.py`) before trusting any defaults.
 
 ### Intervention strategies (`strategies.py`)
 
-All four share one interface — `decide(ctx) -> StrategyDecision` — so the
-experimental comparison is just "run the same conversation loop with a
-different strategy object":
+All strategies share one interface — `decide(ctx) -> StrategyDecision` — so the
+comparison is simply the same conversation loop with a different strategy
+object:
 
 | Strategy | When it fires |
 |---|---|
 | `baseline` | Never (control condition) |
-| `static` | Once, before the very first assistant turn |
+| `static` | Once, before the first assistant turn |
 | `fixed_interval` | Every N turns (default 5), regardless of content |
-| `user_triggered` | Only when the user explicitly asks (`force_intervene=true`) |
-| `adaptive` | When `FixationAnalyzer` detects convergence, with a cooldown so it doesn't refire every turn |
+| `user_triggered` | Only on explicit request (`force_intervene=true`) |
+| `adaptive` | When `FixationAnalyzer` detects convergence, subject to a four-turn cooldown |
 
-A manual override (`force_intervene: true` in `/sessions/{id}/messages`) will
-trigger an intervention **regardless of strategy** — handy for demos/debugging,
-but disable that override path (or just don't expose the button) when running
-the actual controlled experiment, since it defeats the point of comparing
-timing strategies.
+A manual override (`force_intervene: true` on `/sessions/{id}/messages`)
+triggers an intervention regardless of strategy. Events written by this path are
+recorded with `user_forced = 1` in `intervention_events`, so manually requested
+interventions can be distinguished from automatically detected ones after the
+fact.
 
 ### Exploration tree (`intervention.py`)
 
-Five branch categories, per the proposal: `abstract_reframing`,
-`contradictory_perspective`, `adjacent_domain`, `unconventional_alternative`,
-`speculative_future`. Each is `{title, prompt}`. In interactive use, the user
-picks one via `POST /sessions/{id}/branches/select`; in the automated
-experiment runner, each successive intervention within a conversation rotates
-to the next category (see "Results" above for why this matters).
+Five branch categories: `abstract_reframing`, `contradictory_perspective`,
+`adjacent_domain`, `unconventional_alternative`, `speculative_future`. Each is
+`{title, prompt}`. In interactive use the user picks one via
+`POST /sessions/{id}/branches/select`; in the automated runner, successive
+interventions rotate through the categories.
+
+The generator normalises the language model's response before use. Gemini does
+not return a consistent JSON structure between calls — it may return a dict
+keyed by category, a bare list of branch objects, or a wrapper object — and
+`_coerce_tree()` handles all three. An unhandled case caused a crash during a
+live session that thirty automated trials had not triggered.
+
+---
 
 ## Setup
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+source .venv/bin/activate      # .venv\Scripts\activate on Windows
 pip install -r requirements.txt
-cp .env.example .env      # defaults already run fully offline
-uvicorn app.main:app --reload
+cp .env.example .env           # defaults run fully offline
+uvicorn app.main:app
 ```
 
-Visit `http://localhost:8000/docs` for interactive API docs.
+Interactive API docs at `http://localhost:8000/docs`.
 
-### Going live with Gemini + real embeddings
+Everything defaults to **mock** LLM and embedding backends, so the pipeline is
+developable and testable with no API key and no network access.
+
+### Running with Gemini and real embeddings
 
 ```bash
 pip install sentence-transformers google-genai
 ```
 
-> **Important:** use `google-genai` (the current, actively-maintained SDK —
-> `from google import genai`). The older `google-generativeai` package is
-> deprecated and won't work with this client.
->
-> **Model availability changes fast.** This project's default model has
-> already changed twice over the course of development, purely due to
-> Google retiring/restricting models: it started on `gemini-2.5-flash`,
-> which became unreachable for newly-created API keys mid-project (a known,
-> reported issue — see [Google's model list](https://ai.google.dev/gemini-api/docs/models)
-> for the current lineup), and is currently pinned to
-> `gemini-3.5-flash-lite` for stability under free-tier load. If you're
-> reproducing this later, check current model availability before assuming
-> the configured default still works — `llm_client.py`'s retry logic handles
-> transient 503 overload gracefully, but a 404 "no longer available to new
-> users" needs a model swap in `.env`, not a retry.
+Use `google-genai` (`from google import genai`), not the deprecated
+`google-generativeai`.
+
+**Model availability changes quickly.** This project's default model changed
+twice during development as Google retired or restricted models: it began on
+`gemini-2.5-flash`, which became unreachable for newly created API keys
+mid-project, and is currently pinned to `gemini-3.5-flash-lite` for stability
+under free-tier load. Check
+[the current model list](https://ai.google.dev/gemini-api/docs/models) before
+assuming the configured default still works. `llm_client.py` retries transient
+503 overload, but a 404 needs a model swap in `.env`, not a retry.
 
 In `.env`:
+
 ```
 FIXATION_LLM_BACKEND=gemini
 FIXATION_GEMINI_API_KEY=your-key-here
 FIXATION_GEMINI_MODEL=gemini-3.5-flash-lite
 FIXATION_EMBEDDING_BACKEND=sentence-transformers
 ```
+
+---
 
 ## API walkthrough
 
@@ -191,110 +241,116 @@ curl -X POST localhost:8000/sessions -H "Content-Type: application/json" -d '{
   "strategy": "adaptive",
   "seed_prompt": "I want to brainstorm a product for reducing food waste."
 }'
-# -> {"session_id": "...", "assistant_message": "...", ...}
 
-# 2. Keep chatting
+# 2. Continue the conversation
 curl -X POST localhost:8000/sessions/{id}/messages -H "Content-Type: application/json" \
   -d '{"content": "Can you refine that idea further?"}'
-# -> {"assistant_message": "...", "metrics": {...}, "intervened": false}
+# When an intervention fires, "intervened" becomes true and "branches" is
+# populated instead of "assistant_message".
 
-# When fixation is detected (or the strategy's timing rule fires), "intervened"
-# becomes true and "branches" is populated instead of "assistant_message".
-
-# 3. Force an intervention manually (debugging / user_triggered UI button)
+# 3. Force an intervention manually
 curl -X POST localhost:8000/sessions/{id}/messages -H "Content-Type: application/json" \
   -d '{"content": "show me other directions", "force_intervene": true}'
 
-# 4. Pick a branch to continue from
+# 4. Continue from a chosen branch
 curl -X POST localhost:8000/sessions/{id}/branches/select -H "Content-Type: application/json" \
   -d '{"branch_category": "adjacent_domain"}'
 
-# 5. Inspect full history + fixation metrics timeline
+# 5. Full history and fixation metrics timeline
 curl localhost:8000/sessions/{id}
 
-# 6. Post-hoc evaluation metrics for this conversation
+# 6. Post-hoc evaluation metrics
 curl localhost:8000/sessions/{id}/evaluation
 ```
 
-## Running the experimental comparison
+---
+
+## Reproducing the experiment
 
 ```bash
-python -m scripts.run_experiment --plan                     # show what's pending, no calls spent
-python -m scripts.run_experiment --turns 6 --max-calls 12    # run until today's call budget is used
-python -m scripts.run_experiment --only-strategy adaptive    # prioritize one strategy's remaining trials
-python -m scripts.run_experiment --summarize                 # aggregate stats + CSV export
+python -m scripts.run_experiment --plan                    # pending trials, no calls spent
+python -m scripts.run_experiment --turns 6 --max-calls 12  # run within a call budget
+python -m scripts.run_experiment --only-strategy adaptive  # prioritise one strategy
+python -m scripts.run_experiment --summarize               # aggregate stats + CSV export
 ```
 
-Resumable and budget-aware: it persists each completed trial to
-`experiment_results.jsonl` and skips anything already done, so it's safe to
-run once a day against a free-tier daily quota and pick up where it left off.
-`--only-strategy` is useful for prioritizing whichever strategy your
-hypothesis depends on most if you're worried about running out of time
-before finishing the full matrix.
+The runner is resumable and budget-aware: each completed trial is appended to
+`experiment_results.jsonl` and already-completed combinations are skipped, so it
+can be run across several days against a free-tier daily quota.
+`experiment_results.jsonl` in this repository is the complete final dataset used
+for all reported results.
 
-The full matrix here is 3 task types (story generation, product
-brainstorming, interface design) × 2 seed prompts × 5 strategies = 30 trials,
-6 blocks for the Friedman test. `experiment_results.jsonl` in this repo
-contains the complete, final dataset.
+---
+
+## Human study
+
+A small qualitative study with two participants assessed whether the
+exploration-tree intervention is perceived as useful during collaborative
+creative work. Both completed a 15-minute story-generation session through the
+Streamlit interface with the adaptive strategy enabled, followed by a
+fourteen-item Likert questionnaire and a short interview.
+
+- `study/participant_materials.pdf` — task brief, questionnaire, open questions
+- `study/build_materials.py` — regenerates the above
+- `study/data/P0*.json`, `P0*.md` — per-session records from `analyze_session.py`
+- `study/data/P0*_traj.json` — per-turn fixation trajectories
+- `study/data/P0*_responses.pdf` — transcribed questionnaire and interview responses
+
+Participants are identified only by code; no names or contact details were
+collected. Session analysis:
+
+```bash
+python scripts/analyze_session.py --session <SESSION_ID> --json out.json --md out.md
+python scripts/reconstruct_trajectory.py --session <SESSION_ID> --offset 1
+```
+
+`reconstruct_trajectory.py` recomputes the fixation score at every turn from the
+embeddings stored in `fixation.db`, using the project's own `FixationAnalyzer`.
+This is necessary because the backend persists an `InterventionEvent` only when
+an intervention fires, leaving no stored score for intervening turns. Run
+`--validate` to replay all logged events and confirm the recomputed scores match
+the stored ones exactly.
+
+---
 
 ## Frontend
 
-A minimal Streamlit UI is included in `frontend/app.py` — this is what your
-1-2 study participants should actually use, instead of `/docs`.
-
 ```bash
 pip install streamlit requests
-```
-
-With the backend already running (`uvicorn app.main:app --reload` in one
-terminal), run the frontend in a second terminal:
-
-```bash
 streamlit run frontend/app.py
 ```
 
-It opens in your browser automatically. Features:
-- Sidebar: pick task type + strategy, enter an opening prompt, start a session
-- Chat interface for the conversation itself
-- Live fixation metrics (avg similarity, dispersion, fixation score) updating
-  every turn, plus a running chart
-- When an intervention fires, the five exploration branches appear as cards
-  you can click to continue from
-- A manual "Give me alternatives" button (maps to `force_intervene`) for
-  demoing the mechanism on demand, independent of the strategy being tested
-- "View Evaluation Summary" button to see the post-hoc metrics for the
-  current session
+Requires the backend running in another terminal. The interface provides task
+and strategy selection, the chat itself, live fixation metrics with a running
+chart, exploration branches rendered as selectable cards when an intervention
+fires, a manual "give me alternatives" button, and a post-hoc evaluation
+summary. It is a thin HTTP client, so it behaves identically against mock or
+real backends.
 
-The frontend is a thin client — it only talks to the FastAPI backend over
-HTTP, so it works identically whether the backend is running mock or real
-(Gemini + sentence-transformers) backends. Point it at a different backend
-URL via the sidebar field if needed.
+Do not run the frontend while `run_experiment.py` is mid-run — both draw on the
+same daily API quota.
 
-**Don't run the frontend while `run_experiment.py` is mid-run** — both draw
-on the same daily API quota.
+---
 
-## Running tests
+## Tests
 
 ```bash
 pytest tests/ -v
 ```
 
-30 tests covering the fixation-detection math (fixated vs. exploratory
-synthetic conversations), all four strategies' triggering logic (including
-cooldown behavior for the adaptive strategy), and the evaluation metrics.
+Covers the fixation-detection math against synthetic fixated and exploratory
+conversations, all strategies' triggering logic including adaptive cooldown
+behaviour, the evaluation metrics, and the API endpoints.
 
-## What's deliberately left for you to build next
+---
 
-- **Better lexical diversity metric**: currently a simple type-token ratio,
-  and the one metric that didn't reach significance in the Friedman test —
-  swap in `lexicalrichness` (MTLD/MATTR) if the writeup calls for it, since
-  raw TTR is highly sensitive to conversation length rather than genuine
-  lexical variety.
-- **User study harness**: `run_experiment.py` automates the *system-vs-system*
-  comparison; the human user study (perceived creativity support, fixation
-  reduction, satisfaction) needs a small survey instrument on top of the
-  Streamlit frontend above.
-- **Post-hoc pairwise tests**: the Friedman test establishes an overall
-  difference across strategies; a Nemenyi or Wilcoxon post-hoc test would
-  pin down exactly which pairwise differences (e.g. adaptive vs. static)
+## Known limitations
+
+- Lexical diversity uses a plain type-token ratio, which is sensitive to
+  conversation length rather than genuine lexical variety. MTLD or MATTR
+  (via `lexicalrichness`) would be a better measure.
+- The Friedman test establishes an overall difference across strategies; a
+  Nemenyi or Wilcoxon post-hoc test would identify which pairwise differences
   are individually significant.
+- The fixation thresholds were calibrated against embedding statistics, not
+  against human-labelled fixation events.

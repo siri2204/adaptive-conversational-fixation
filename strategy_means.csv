@@ -1,0 +1,6 @@
+strategy,semantic_diversity,embedding_dispersion,lexical_diversity,novelty_score
+baseline,0.5746,0.7231,0.2013,0.8387
+static,0.5964,0.7391,0.2118,0.8393
+fixed_interval,0.5930,0.7313,0.1936,0.8498
+user_triggered,0.5959,0.7340,0.2118,0.8558
+adaptive,0.6483,0.7644,0.3121,0.8852
